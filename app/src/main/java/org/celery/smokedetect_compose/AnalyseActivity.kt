@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import coil.request.ImageRequest
 import com.yalantis.ucrop.UCrop
 import kotlinx.coroutines.CoroutineScope
@@ -105,7 +107,10 @@ class AnalyseActivity : AppCompatActivity() {
     //选区是否变化
     private var isChanged = true
 
+    //是否开启灰度化
     private var enableGrayScale by mutableStateOf(false)
+
+    //亮度增益
     private var lumaOffset by mutableStateOf(0f)
 
     //协程作用域
@@ -118,6 +123,7 @@ class AnalyseActivity : AppCompatActivity() {
         curUri = oriUri
         bitmap = loadImage()
         editPhoto {
+            //第一次若取消编辑说明不想要图片需要重新拍照或选照片
             finish()
         }
         scoop.launch {
@@ -182,7 +188,7 @@ class AnalyseActivity : AppCompatActivity() {
             }
             Surface {
                 Column(Modifier.fillMaxSize()) {
-
+                    //灰度和增益矩阵
                     val colorMatrix = if (enableGrayScale) ColorMatrix(
                         floatArrayOf(
                             0.2126f + 0.2126f * lumaOffset,
@@ -207,6 +213,7 @@ class AnalyseActivity : AppCompatActivity() {
                             0F
                         )
                     )
+                    //增益矩阵
                     else ColorMatrix(
                         floatArrayOf(
                             1f + lumaOffset,
@@ -266,8 +273,22 @@ class AnalyseActivity : AppCompatActivity() {
                                 Modifier.fillParentMaxWidth(),
                                 -0.8f..1.5f
                             ) { lumaOffset = it;isChanged = true }
-                            Row{
-                                Button(onClick = { /*TODO*/ }) {
+                            Row {
+                                Button(onClick = {
+                                    scoop.launch(Dispatchers.IO) {
+                                        val rendered = renderCanvas()
+                                        val fileName =
+                                            System.currentTimeMillis().toString() + ".jpg"
+                                        if (filesDir.resolve("cache").exists().not())
+                                            filesDir.resolve("cache").mkdir()
+                                        val file: File = File(filesDir.resolve("cache"), fileName)
+                                        val fos = FileOutputStream(file)
+                                        rendered.compress(Bitmap.CompressFormat.JPEG, 100, fos)
+                                        fos.flush()
+                                        fos.close()
+                                        Log.d(TAG, "img saved at ${file.absolutePath}")
+                                        shareWeChat(FileProvider.getUriForFile(applicationContext,applicationContext.packageName,file))
+                                    }}) {
                                     Icon(Icons.Rounded.Share, "Share")
                                 }
                                 Button(onClick = {
@@ -284,7 +305,8 @@ class AnalyseActivity : AppCompatActivity() {
                                         rendered.compress(Bitmap.CompressFormat.JPEG, 100, fos)
                                         fos.flush()
                                         fos.close()
-                                        Log.d(TAG, "img saved at ${file.absolutePath}")
+                                        Toast.makeText(applicationContext, "img saved at ${file.absolutePath}",Toast.LENGTH_SHORT).show()
+
                                     }
                                 }) {
                                     Icon(Icons.Rounded.SaveAlt, "Save to local")
@@ -295,6 +317,21 @@ class AnalyseActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+    private fun shareWeChat(uri: Uri) {
+        val shareIntent = Intent()
+        //发送图片到朋友圈
+        //ComponentName comp = new ComponentName("com.tencent.mm", "com.tencent.mm.ui.tools.ShareToTimeLineUI");
+        //发送图片给好友。
+//        val comp = ComponentName("com.tencent.mm", "com.tencent.mm.ui.tools.ShareImgUI")
+        shareIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+
+//        shareIntent.setComponent(comp);
+        shareIntent.setAction(Intent.ACTION_SEND);
+        shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
+        shareIntent.setType("image/jpeg");
+        startActivity(Intent.createChooser(shareIntent, "分享图片"))
     }
 
     fun renderCanvas(): Bitmap {
@@ -307,8 +344,7 @@ class AnalyseActivity : AppCompatActivity() {
             "renderCanvas: draw rect[${canvasX * percentageStartX},${canvasY * percentageStartY},${canvasX * percentageEndX},${canvasY * percentageEndY}]"
         )
         val len = canvasX * percentageStartX
-        val len2 =
-        canvas.drawRect(canvasX * percentageStartX * (this.bitmap!!.width / canvasX),
+        val len2 = canvas.drawRect(canvasX * percentageStartX * (this.bitmap!!.width / canvasX),
             canvasY * percentageStartY * (this.bitmap!!.height / canvasY),
             canvasX * percentageEndX * (this.bitmap!!.width / canvasX),
             canvasY * percentageEndY * (this.bitmap!!.height / canvasY),
