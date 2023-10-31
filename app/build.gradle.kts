@@ -1,6 +1,3 @@
-import java.net.URI
-import java.net.URL
-
 @Suppress("DSL_SCOPE_VIOLATION") // TODO: Remove once KTIJ-19369 is fixed
 plugins {
     alias(libs.plugins.androidApplication)
@@ -53,12 +50,9 @@ android {
     }
 }
 dependencies {
-    implementation ("com.google.android.material:material:1.4.0")
-    implementation ("androidx.compose.material:material-icons-extended:1.3.0")
-
-
-    implementation(libs.ucrop)
-//    implementation(libs.ucropedit)
+    implementation (libs.androidx.material.icons.extended)
+//    implementation(libs.ucrop)
+    implementation(libs.ucropnedit)
     implementation(libs.coil.compose)
     implementation(libs.appcompat)
     implementation(libs.material)

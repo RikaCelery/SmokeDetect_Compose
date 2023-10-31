@@ -3,56 +3,56 @@ package org.celery.smokedetect_compose
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredHeight
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SaveAlt
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
-import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.yalantis.ucrop.UCrop
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.celery.smokedetect_compose.component.OptionSlider
+import org.celery.smokedetect_compose.component.OptionSwitch
+import org.celery.smokedetect_compose.component.PreviewBox
 import java.io.File
+import java.io.FileOutputStream
 import kotlin.math.max
 import kotlin.math.min
 
@@ -76,34 +76,9 @@ class AnalyseActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 裁剪图片
-     */
-    private fun cropRawPhoto(uri: Uri, toUri: Uri) {
-        // 修改配置参数（我这里只是列出了部分配置，并不是全部）
-        val options = UCrop.Options()
-        // 隐藏底部工具
-        options.setHideBottomControls(false)
-        // 图片格式
-        options.setCompressionFormat(Bitmap.CompressFormat.JPEG)
-        // 设置图片压缩质量
-        options.setCompressionQuality(100)
-        // 是否让用户调整范围(默认false)，如果开启，可能会造成剪切的图片的长宽比不是设定的
-        // 如果不开启，用户不能拖动选框，只能缩放图片
-        options.setFreeStyleCropEnabled(true)
-
-        // 设置源uri及目标uri
-        UCrop.of(
-            uri, toUri
-        ) // 长宽比
-//            .withAspectRatio(1f, 1f) // 图片大小
-//            .withMaxResultSize(200, 200) // 配置参数
-            .withOptions(options).start(this)
-    }
-
     //用于驱动页面刷新的的一系列变量
     //选区平均亮度
-    private var avg by mutableStateOf<Double>(0.0)
+    private var luma by mutableStateOf<Double>(0.0)
 
     //裁剪后的bimap
     private var bitmap by mutableStateOf<Bitmap?>(null)
@@ -130,8 +105,11 @@ class AnalyseActivity : AppCompatActivity() {
     //选区是否变化
     private var isChanged = true
 
-    //计算亮度的协程作用域
-    private val calcScoop = CoroutineScope(SupervisorJob())
+    private var enableGrayScale by mutableStateOf(false)
+    private var lumaOffset by mutableStateOf(0f)
+
+    //协程作用域
+    private val scoop = CoroutineScope(SupervisorJob())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,7 +120,7 @@ class AnalyseActivity : AppCompatActivity() {
         editPhoto {
             finish()
         }
-        calcScoop.launch {
+        scoop.launch {
             while (isActive) {
                 if (isChanged) {
                     calculateSelectedLuma()
@@ -152,7 +130,6 @@ class AnalyseActivity : AppCompatActivity() {
             }
         }
         setContent {
-
             val previewImage = ImageRequest.Builder(LocalContext.current).apply {
                 if (bitmap != null) data(bitmap)
             }.crossfade(true).build()
@@ -205,17 +182,199 @@ class AnalyseActivity : AppCompatActivity() {
             }
             Surface {
                 Column(Modifier.fillMaxSize()) {
-                    PreviewBox(previewImage, onClick, onDragStart, onDrag, onDraw)
-                    Text("选区平均亮度: $avg")
-                    Slider(percentageStartX, { percentageStartX = it;isChanged = true })
-                    Slider(percentageStartY, { percentageStartY = it;isChanged = true })
-                    Slider(percentageEndX, { percentageEndX = it;isChanged = true })
-                    Slider(percentageEndY, { percentageEndY = it;isChanged = true })
+
+                    val colorMatrix = if (enableGrayScale) ColorMatrix(
+                        floatArrayOf(
+                            0.2126f + 0.2126f * lumaOffset,
+                            0.7152f + 0.7152f * lumaOffset,
+                            0.0722f + 0.0722f * lumaOffset,
+                            0.0f,
+                            lumaOffset,
+                            0.2126f + 0.2126f * lumaOffset,
+                            0.7152f + 0.7152f * lumaOffset,
+                            0.0722f + 0.0722f * lumaOffset,
+                            0.0f,
+                            lumaOffset,
+                            0.2126f + 0.2126f * lumaOffset,
+                            0.7152f + 0.7152f * lumaOffset,
+                            0.0722f + 0.0722f * lumaOffset,
+                            0.0f,
+                            lumaOffset,
+                            0.0f,
+                            0.0f,
+                            0.0f,
+                            1.0f,
+                            0F
+                        )
+                    )
+                    else ColorMatrix(
+                        floatArrayOf(
+                            1f + lumaOffset,
+                            0f,
+                            0f,
+                            0.0f,
+                            0f,
+                            0f,
+                            1f + lumaOffset,
+                            0f,
+                            0.0f,
+                            0f,
+                            0f,
+                            0f,
+                            1f + lumaOffset,
+                            0.0f,
+                            0f,
+                            0.0f,
+                            0.0f,
+                            0.0f,
+                            1.0f,
+                            0F
+                        )
+                    )
+                    PreviewBox(
+                        previewImage = previewImage,
+                        onClick = onClick,
+                        onDragStart = onDragStart,
+                        onDrag = onDrag,
+                        onDraw = onDraw,
+                        colorfilter = ColorFilter.colorMatrix(colorMatrix)
+                    )
+                    Text("选区平均亮度: $luma")
+                    val blackLevel = luma2level(luma)
+                    Text("对应黑度级别: $blackLevel")
+                    LazyColumn(
+                        contentPadding = PaddingValues(10.dp, 0.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        item {
+                            Slider(percentageStartX, { percentageStartX = it;isChanged = true })
+                            Slider(percentageStartY, {
+                                percentageStartY = it;isChanged = true;Log.e(
+                                TAG,
+                                "change:  $isChanged",
+
+                                )
+                            })
+                            Slider(percentageEndX, { percentageEndX = it;isChanged = true })
+                            Slider(percentageEndY, { percentageEndY = it;isChanged = true })
+                            OptionSwitch(
+                                "开启灰度滤镜", enableGrayScale, Modifier.fillParentMaxWidth()
+                            ) { enableGrayScale = it }
+                            OptionSlider(
+                                "亮度补偿 %.2f".format(lumaOffset),
+                                lumaOffset,
+                                Modifier.fillParentMaxWidth(),
+                                -0.8f..1.5f
+                            ) { lumaOffset = it;isChanged = true }
+                            Row{
+                                Button(onClick = { /*TODO*/ }) {
+                                    Icon(Icons.Rounded.Share, "Share")
+                                }
+                                Button(onClick = {
+                                    scoop.launch(Dispatchers.IO) {
+                                        val rendered = renderCanvas()
+                                        val directoryPath =
+                                            Environment.getExternalStoragePublicDirectory(
+                                                Environment.DIRECTORY_PICTURES
+                                            ).path
+                                        val fileName =
+                                            System.currentTimeMillis().toString() + ".jpg"
+                                        val file: File = File(directoryPath, fileName)
+                                        val fos = FileOutputStream(file)
+                                        rendered.compress(Bitmap.CompressFormat.JPEG, 100, fos)
+                                        fos.flush()
+                                        fos.close()
+                                        Log.d(TAG, "img saved at ${file.absolutePath}")
+                                    }
+                                }) {
+                                    Icon(Icons.Rounded.SaveAlt, "Save to local")
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
+    fun renderCanvas(): Bitmap {
+        val bitmap = Bitmap.createBitmap(bitmap!!.width, bitmap!!.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawBitmap(this.bitmap!!, 0f, 0f, Paint())
+        Log.d(TAG, "renderCanvas: canvas${canvas.width}x${canvas.height}")
+        Log.d(
+            TAG,
+            "renderCanvas: draw rect[${canvasX * percentageStartX},${canvasY * percentageStartY},${canvasX * percentageEndX},${canvasY * percentageEndY}]"
+        )
+        val len = canvasX * percentageStartX
+        val len2 =
+        canvas.drawRect(canvasX * percentageStartX * (this.bitmap!!.width / canvasX),
+            canvasY * percentageStartY * (this.bitmap!!.height / canvasY),
+            canvasX * percentageEndX * (this.bitmap!!.width / canvasX),
+            canvasY * percentageEndY * (this.bitmap!!.height / canvasY),
+            Paint().apply {
+                style = Paint.Style.STROKE
+                this.color = 0xff00ffff.toInt()
+                this.strokeWidth = 4f
+            })
+        canvas.drawText("luma:$luma", 10f, 50f, Paint().apply {
+            textSize = 40f
+        })
+        canvas.drawText("level:${luma2level(luma)}", 10f, 100f, Paint().apply {
+            textSize = 40f
+        })
+        canvas.save()
+        canvas.restore()
+        return bitmap
+    }
+
+    private fun luma2level(luma: Double): Int {
+        val blackAmount = (255.0 - luma) / 255
+        val blackLevel = when {
+            blackAmount >= 0 && blackAmount < 0.2 -> 0
+            blackAmount >= 0.2 && blackAmount < 0.4 -> 1
+            blackAmount >= 0.4 && blackAmount < 0.6 -> 2
+            blackAmount >= 0.6 && blackAmount < 0.8 -> 3
+            blackAmount >= 0.8 && blackAmount < 1 -> 4
+            blackAmount >= 1.0 -> 5
+            else -> {
+                Log.e(TAG, "avg can not be negative $luma");-1
+            }
+        }
+        return blackLevel
+    }
+
+    private fun rotateImage(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
+        val matrix = Matrix()
+        matrix.postRotate(rotationDegrees.toFloat())
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+
+    /**
+     * 裁剪图片
+     */
+    private fun cropRawPhoto(uri: Uri, toUri: Uri) {
+        // 修改配置参数（我这里只是列出了部分配置，并不是全部）
+        val options = UCrop.Options()
+        // 隐藏底部工具
+        options.setHideBottomControls(false)
+        // 图片格式
+        options.setCompressionFormat(Bitmap.CompressFormat.JPEG)
+        // 设置图片压缩质量
+        options.setCompressionQuality(100)
+        // 是否让用户调整范围(默认false)，如果开启，可能会造成剪切的图片的长宽比不是设定的
+        // 如果不开启，用户不能拖动选框，只能缩放图片
+        options.setFreeStyleCropEnabled(false)
+
+        // 设置源uri及目标uri
+        UCrop.of(
+            uri, toUri
+        ) // 长宽比
+            .withAspectRatio(1f, 1f) // 图片大小
+//            .withMaxResultSize(200, 200) // 配置参数
+            .withOptions(options).start(this)
+    }
 
     /**
      * 获取编辑后的bitmap
@@ -246,13 +405,13 @@ class AnalyseActivity : AppCompatActivity() {
             (percentageStartX * bigImageWidth).toInt(), (percentageEndX * bigImageWidth).toInt()
         )
         val startY = min(
-            (percentageEndX * bigImageHeight).toInt(), (percentageEndY * bigImageHeight).toInt()
+            (percentageStartY * bigImageHeight).toInt(), (percentageEndY * bigImageHeight).toInt()
         )
         val endX = max(
             (percentageStartX * bigImageWidth).toInt(), (percentageEndX * bigImageWidth).toInt()
         )
         val endY = max(
-            (percentageEndX * bigImageHeight).toInt(), (percentageEndY * bigImageHeight).toInt()
+            (percentageStartY * bigImageHeight).toInt(), (percentageEndY * bigImageHeight).toInt()
         )
 
         // 映射到小图中的坐标范围
@@ -282,8 +441,8 @@ class AnalyseActivity : AppCompatActivity() {
         }
 
         val avg1 = sum / n
-        Log.e(TAG, "avg luma: $avg1")
-        avg = avg1
+        Log.v(TAG, "avg luma: $avg1")
+        luma = (avg1 + avg1 * lumaOffset).coerceAtMost(255.0)
     }
 
     /**
@@ -318,61 +477,6 @@ class AnalyseActivity : AppCompatActivity() {
             //点击了取消编辑。执行取消时的动作
             onCancel?.invoke()
             Log.e(TAG, "resultCode:$resultCode requestCode:$requestCode")
-        }
-    }
-}
-
-/**
- * 顶部的预览组件
- */
-@Composable
-private fun PreviewBox(
-    previewImage: ImageRequest,
-    onClick: () -> Unit,
-    onDragStart: (Offset) -> Unit,
-    onDrag: (PointerInputChange, Offset) -> Unit,
-    onDraw: DrawScope.() -> Unit
-) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .zIndex(1f)
-            .background(MaterialTheme.colorScheme.surface)
-            .shadow(5.dp)
-            .padding(20.dp)
-    ) {
-        AsyncImage(
-            model = previewImage,
-            placeholder = painterResource(R.drawable.ic_launcher_background),
-            contentDescription = stringResource(R.string.app_name),
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth()
-                .requiredHeight(400.dp)
-        )
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .requiredHeight(400.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures(onDragStart = onDragStart, onDragCancel = {
-                        Log.v(AnalyseActivity.TAG, "drag canceled")
-                    }, onDragEnd = {
-                        Log.v(AnalyseActivity.TAG, "drag ended")
-                    }, onDrag = onDrag
-                    )
-                }, onDraw
-        )
-
-        Button(
-            onClick,
-            contentPadding = PaddingValues(0.dp),
-            modifier = Modifier
-                .padding(10.dp)
-                .align(Alignment.TopEnd)
-                .size(50.dp)
-        ) {
-            Text("edit")
         }
     }
 }

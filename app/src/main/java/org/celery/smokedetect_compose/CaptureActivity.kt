@@ -120,8 +120,9 @@ class CaptureActivity : AppCompatActivity() {
         viewBinding.progressBar2.visibility = View.VISIBLE
         viewBinding.bg.visibility = View.VISIBLE
 
-        val photoFile = File(filesDir, "import.bmp")
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        val photoFile = File(filesDir, "import.jpeg")
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile)
+            .setMetadata(ImageCapture.Metadata()).build()
 
 
         imageCapture.takePicture(outputOptions,ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
