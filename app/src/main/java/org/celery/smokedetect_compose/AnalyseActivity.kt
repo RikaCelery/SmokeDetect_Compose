@@ -50,6 +50,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.celery.smokedetect_compose.component.OptionSlider
 import org.celery.smokedetect_compose.component.OptionSwitch
 import org.celery.smokedetect_compose.component.PreviewBox
@@ -305,8 +306,13 @@ class AnalyseActivity : AppCompatActivity() {
                                         rendered.compress(Bitmap.CompressFormat.JPEG, 100, fos)
                                         fos.flush()
                                         fos.close()
-                                        Toast.makeText(applicationContext, "img saved at ${file.absolutePath}",Toast.LENGTH_SHORT).show()
-
+                                        withContext(Dispatchers.Main){
+                                            Toast.makeText(
+                                                applicationContext,
+                                                "img saved at ${file.absolutePath}",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     }
                                 }) {
                                     Icon(Icons.Rounded.SaveAlt, "Save to local")
